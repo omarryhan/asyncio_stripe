@@ -2,12 +2,8 @@ import aiohttp
 import attr
 
 
-class StripeException(Exception):
-    pass
-
-
-class StripeError(StripeException):
-    def __init__(self, resp, body):
+class StripeError(Exception):
+    def __init__(self, resp, body, e=None):
         self.type = None
         self.charge = None
         self.message = None
@@ -15,7 +11,10 @@ class StripeError(StripeException):
         self.decline_code = None
         self.param = None
         self.http_code = resp.status
+        self.method = getattr(resp, 'method', None)
+        self.original_exception = e
 
+        # Populate error from reponse.body
         if isinstance(body, dict):
             err = body.get('error', {})
             if err:
@@ -26,28 +25,22 @@ class StripeError(StripeException):
                 self.decline_code = err.get('decline_code', '')
                 self.param = err.get('param', '')
 
-        def addstr(key, fmt):
-            v = getattr(self, key, None)
-            if v is not None and v:
-                return fmt % (v,)
-            return ''
+        error_params = [
+            'charge',
+            'message',
+            'code',
+            'decline',
+            'param',
+            'method',
+            'original_exception'
+        ]
+        error_msg = ''
 
-        super().__init__('%s:%s%s%s%s%s%s' % (
-            resp.status,
-            addstr('type', ' %s:'),
-            addstr('charge', ' charge: %s'),
-            addstr('message', ' message: "%s"'),
-            addstr('code', ' code: %s'),
-            addstr('decline', ' decline: %s'),
-            addstr('param', ' param: %s'),))
-
-
-class ParseError(StripeException):
-    pass
-
-
-class DeletionError(StripeException):
-    pass
+        for error_param in error_params:
+            error_msg += '{}: {}'.format(
+                error_param, getattr(self, error_param, '')
+            )
+        super().__init__(error_msg)
 
 
 @attr.s(slots=True, frozen=True)
@@ -214,27 +207,27 @@ class Client(object):
             if isinstance(v, bool)})
 
         r = await self._session.request(
-                method.upper(),
-                url,
-                params=params,
-                auth=self._auth,
-                headers=headers)
+            method.upper(),
+            url,
+            params=params,
+            auth=self._auth,
+            headers=headers
+        )
 
         if r.headers.get('Content-Type', '').startswith('application/json'):
             body = await r.json()
         else:
             body = await r.read()
 
-        if r.status != 200:
-            raise StripeError(r, body)
-
-        if method.upper() == 'DELETE':
-            if not body.get('deleted', False):
-                raise DeletionError('Failed to delete %s' % (body.get('id'),))
-            return
-
-        if 'object' not in body:
-            raise ParseError('Stripe response missing "object": %s' % (body,))
+        # In case anything is wrong with the request or with the server,
+        # Stripe will return an HTTP error that is not less than 400
+        # With an error embedded in the Json returned
+        # Also:
+        # https://mail.python.org/pipermail/tutor/2003-October/025932.html
+        try:
+            r.raise_for_status()
+        except aiohttp.ClientResponseError as e:
+            raise StripeError(r, body, e)
 
         return convert_json_response(body)
 

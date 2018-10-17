@@ -99,20 +99,21 @@ class TestClient(unittest.TestCase):
         r = stripe.convert_json_response(j)
 
         keys = (
-          'id',
-          'account_balance',
-          'created',
-          'currency',
-          'default_source',
-          'delinquent',
-          'description',
-          'discount',
-          'email',
-          'livemode',
-          'invoice_prefix',
-          'metadata',
-          'shipping',
+            'id',
+            'account_balance',
+            'created',
+            'currency',
+            'default_source',
+            'delinquent',
+            'description',
+            'discount',
+            'email',
+            'livemode',
+            'invoice_prefix',
+            'metadata',
+            'shipping',
         )
+
         for key in keys:
             self.assertEqual(j[key], getattr(r, key))
 
@@ -175,34 +176,6 @@ class TestClient(unittest.TestCase):
         )
         for key in keys:
             self.assertEqual(getattr(r, key), j[key])
-
-    def test_error_parsing(self):
-        error_body = '''
-            {
-                "error": {
-                    "type": "invalid_request_error",
-                    "message": "Customer cus_XXX does not have a linked source with ID card_YYYY.",
-                    "param": "source",
-                    "code": "missing"
-                }
-            }
-        '''
-        resp = unittest.mock.MagicMock(spec=aiohttp.client_reqrep.ClientResponse)
-        resp.status = 404
-        resp.headers = multidict.CIMultiDict({'content-type': 'application/json'})
-        base.mkfuture(resp, self._session.request)
-        error = json.loads(error_body)
-        base.mkfuture(error, resp.json)
-
-        with self.assertRaises(stripe.StripeError) as exc:
-            base.run_until(self._stripe.create_charge(amount=103, currency='usd', k='1', j=2))
-        self.assertEqual(exc.exception.type, 'invalid_request_error')
-        self.assertEqual(exc.exception.charge, '')
-        self.assertEqual(exc.exception.message, 'Customer cus_XXX does not have a linked source with ID card_YYYY.')
-        self.assertEqual(exc.exception.code, 'missing')
-        self.assertEqual(exc.exception.decline_code, '')
-        self.assertEqual(exc.exception.param, 'source')
-        self.assertEqual(exc.exception.http_code, 404)
 
     def test_param_conversion(self):
         resp = unittest.mock.MagicMock(spec=aiohttp.client_reqrep.ClientResponse)
